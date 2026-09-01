@@ -5,10 +5,9 @@ from bs4 import BeautifulSoup
 
 app = FastAPI()
 
-# Allow your local React app and future Render frontend to connect
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -20,25 +19,40 @@ def read_root():
 
 @app.get("/api/problem/{contest_id}/{index}")
 def get_problem(contest_id: str, index: str):
-    url = f"https://codeforces.com/contest/{contest_id}/problem/{index}"
+    urls = [
+        f"https://codeforces.com/contest/{contest_id}/problem/{index}",
+        f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
+    ]
     
-    # cloudscraper mimics a real browser to bypass Cloudflare
-    scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
+    scraper = cloudscraper.create_scraper(
+        browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+    )
     
-    try:
-        response = scraper.get(url, timeout=15.0)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
-
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail=f"Failed to fetch problem. Codeforces returned status code: {response.status_code}")
+    html_content = None
+    last_status = 404
     
-    soup = BeautifulSoup(response.text, "html.parser")
+    for url in urls:
+        try:
+            resp = scraper.get(url, timeout=15.0)
+            if resp.status_code == 200 and "problem-statement" in resp.text:
+                html_content = resp.text
+                break
+            last_status = resp.status_code
+        except Exception as e:
+            continue
+            
+    if not html_content:
+        raise HTTPException(
+            status_code=last_status, 
+            detail="Problem statement could not be retrieved. Codeforces may have triggered a Cloudflare challenge on the server IP."
+        )
+        
+    soup = BeautifulSoup(html_content, "html.parser")
     statement_div = soup.find("div", class_="problem-statement")
     
     if not statement_div:
-        raise HTTPException(status_code=404, detail="Problem statement not found in the HTML. Cloudflare may have blocked the request.")
-    
+        raise HTTPException(status_code=404, detail="Problem statement element not found in page.")
+        
     test_cases = []
     sample_tests = statement_div.find("div", class_="sample-test")
     
@@ -50,7 +64,6 @@ def get_problem(contest_id: str, index: str):
             in_pre = in_div.find("pre")
             out_pre = out_div.find("pre")
             
-            # Extract text, preserving multiline format
             in_text = in_pre.get_text(separator="\n").strip() if in_pre else ""
             out_text = out_pre.get_text(separator="\n").strip() if out_pre else ""
             
