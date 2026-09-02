@@ -1,13 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import cloudscraper
+from curl_cffi import requests
 from bs4 import BeautifulSoup
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -24,27 +24,25 @@ def get_problem(contest_id: str, index: str):
         f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
     ]
     
-    scraper = cloudscraper.create_scraper(
-        browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
-    )
-    
     html_content = None
     last_status = 404
     
     for url in urls:
         try:
-            resp = scraper.get(url, timeout=15.0)
+            # impersonate="chrome110" perfectly fakes a real Chrome browser's TLS fingerprint
+            resp = requests.get(url, impersonate="chrome110", timeout=15.0)
             if resp.status_code == 200 and "problem-statement" in resp.text:
                 html_content = resp.text
                 break
             last_status = resp.status_code
         except Exception as e:
+            print(f"Error fetching {url}: {e}")
             continue
             
     if not html_content:
         raise HTTPException(
             status_code=last_status, 
-            detail="Problem statement could not be retrieved. Codeforces may have triggered a Cloudflare challenge on the server IP."
+            detail="Problem statement could not be retrieved. Cloudflare is blocking the Render IP."
         )
         
     soup = BeautifulSoup(html_content, "html.parser")
